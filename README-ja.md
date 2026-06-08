@@ -2,7 +2,7 @@
 
 [README in English](README.md)
 
-`[fujibee/agmsg](https://github.com/fujibee/agmsg)` の SQLite アーキテクチャを利用し、OpenCode AI エージェントへ非同期に他のエージェントからのコンテキストを自動注入するネイティブプラグインです。
+[fujibee/agmsg](https://github.com/fujibee/agmsg) の SQLite アーキテクチャを利用し、OpenCode AI エージェントへ非同期に他のエージェントからのコンテキストを自動注入するネイティブプラグインです。
 
 外部シェルスクリプトのラッパーとは異なり、OpenCode の Bun ランタイム内部からローカルの SQLite データベースに直接アクセスします。`UPDATE ... RETURNING` によるアトミックなメッセージ取得と WAL（Write-Ahead Logging）モードにより、安全かつ効率的なマルチエージェント連携を実現します。
 
