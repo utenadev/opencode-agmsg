@@ -1,5 +1,7 @@
 # opencode-agmsg
 
+[README in Japanese (日本語)](README-ja.md)
+
 A native OpenCode plugin providing clean, zero-overhead asynchronous multi-agent orchestration via the `fujibee/agmsg` SQLite architecture.
 
 Unlike traditional shell-wrapper mechanisms that cause process fork inflation, this plugin connects natively to your local SQLite database file inside OpenCode's Bun runtime. It atomically reads and acknowledges incoming coordination messages using `UPDATE ... RETURNING` with Write-Ahead Logging (WAL) concurrency.
@@ -71,3 +73,16 @@ export AGMSG_TEAM="frontend-refactor-crew"
 export AGMSG_COOLDOWN_MS=30000
 export AGMSG_WATCH_INTERVAL=10
 ```
+
+## Acknowledgments
+
+This plugin would not exist without agmsg. (Well, obviously.)
+Thanks to [@fujibee](https://github.com/fujibee) for creating such a useful system.
+
+## License
+
+MIT
+
+## Contribute
+
+We warmly welcome contributors. This project is only 5 hours old and needs more dogfooding — your help is greatly appreciated.
