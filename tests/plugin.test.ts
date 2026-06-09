@@ -12,7 +12,7 @@ afterAll(() => { delete process.env.AGMSG_WATCH_INTERVAL; });
 type SystemTransformOutput = { system: string[] };
 
 function freshDb(): string {
-  const dir = mkdtempSync(join(tmpdir(), "opencode-agmsg-"));
+  const dir = mkdtempSync(join(tmpdir(), "agmsg-opencode-plugin-"));
   const dbPath = join(dir, "test.db");
   const db = new Database(dbPath);
   db.exec(`

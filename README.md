@@ -1,4 +1,4 @@
-# opencode-agmsg
+# agmsg-opencode-plugin
 
 [README in Japanese (日本語)](README-ja.md)
 
@@ -24,7 +24,7 @@ Unlike traditional shell-wrapper mechanisms that cause process fork inflation, t
 ### 1. Place in Your OpenCode Workspace
 
 ```bash
-mkdir -p /your/workspace/.opencode/plugins/opencode-agmsg
+mkdir -p /your/workspace/.opencode/plugins/agmsg-opencode-plugin
 # Copy index.ts into the directory above
 ```
 
@@ -35,7 +35,7 @@ Add to your `opencode.json`:
 ```json
 {
   "plugin": [
-    "./.opencode/plugins/opencode-agmsg/index.ts"
+    "./.opencode/plugins/agmsg-opencode-plugin/index.ts"
   ]
 }
 ```

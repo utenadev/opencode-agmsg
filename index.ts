@@ -37,7 +37,7 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
   const log = options.log ?? (() => {});
 
   if (!fs.existsSync(dbPath)) {
-    log(`[opencode-agmsg] Database not found at ${dbPath}. Plugin is a no-op.`);
+    log(`[agmsg-opencode-plugin] Database not found at ${dbPath}. Plugin is a no-op.`);
     return {};
   }
 
@@ -77,7 +77,7 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
         hasPendingMessages = true;
       }
     } catch (error) {
-      log(`[opencode-agmsg] Poll error: ${error}`);
+      log(`[agmsg-opencode-plugin] Poll error: ${error}`);
     }
   }, pollIntervalMs);
 
@@ -92,9 +92,9 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
           hasPendingMessages = false;
           const msg = consumeStmt.get(teamName, agentName) as AgmsgMessage | undefined;
           if (msg?.body) {
-            log(`[opencode-agmsg] Idle-caught message from ${msg.from_agent} (#${msg.id})`);
+            log(`[agmsg-opencode-plugin] Idle-caught message from ${msg.from_agent} (#${msg.id})`);
             output.system.push(formatNotification(msg));
-            log(`[opencode-agmsg] Message #${msg.id} consumed`);
+            log(`[agmsg-opencode-plugin] Message #${msg.id} consumed`);
           }
           return;
         }
@@ -105,13 +105,13 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
 
         const msg = consumeStmt.get(teamName, agentName) as AgmsgMessage | undefined;
         if (msg?.body) {
-          log(`[opencode-agmsg] Message from ${msg.from_agent} (#${msg.id})`);
+          log(`[agmsg-opencode-plugin] Message from ${msg.from_agent} (#${msg.id})`);
           output.system.push(formatNotification(msg));
-          log(`[opencode-agmsg] Message #${msg.id} consumed`);
+          log(`[agmsg-opencode-plugin] Message #${msg.id} consumed`);
         }
       } catch (error) {
-        log(`[opencode-agmsg] Fatal: ${error}`);
-        console.error("[opencode-agmsg] Fatal:", error);
+        log(`[agmsg-opencode-plugin] Fatal: ${error}`);
+        console.error("[agmsg-opencode-plugin] Fatal:", error);
         throw error;
       }
     },

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e.sh — End-to-end test for opencode-agmsg plugin
+# e2e.sh — End-to-end test for agmsg-opencode-plugin plugin
 #
 # 1. Creates a temporary workspace with a test agmsg database
 # 2. Seeds an unread message for team=test-team / to_agent=opencode
@@ -15,8 +15,8 @@ if ! command -v opencode &>/dev/null; then
   echo "Install: curl -fsSL https://opencode.ai/install | sh"
   exit 1
 fi
-E2E_DIR=$(mktemp -d /tmp/opencode-agmsg-e2e-XXXXX)
-PLUGIN_DIR="$E2E_DIR/opencode-agmsg"
+E2E_DIR=$(mktemp -d /tmp/agmsg-opencode-plugin-e2e-XXXXX)
+PLUGIN_DIR="$E2E_DIR/agmsg-opencode-plugin"
 TEAM="test-team"
 AGENT="opencode"
 PASS=0
@@ -25,7 +25,7 @@ FAIL=0
 cleanup() { rm -rf "$E2E_DIR"; }
 trap cleanup EXIT
 
-echo "=== opencode-agmsg E2E Test ==="
+echo "=== agmsg-opencode-plugin E2E Test ==="
 echo "Temp workspace: $E2E_DIR"
 
 mkdir -p "$PLUGIN_DIR"
@@ -33,7 +33,7 @@ cp "$ROOT_DIR/index.ts" "$PLUGIN_DIR/index.ts"
 
 cat > "$E2E_DIR/opencode.json" <<JSON
 {
-  "plugin": ["./opencode-agmsg/index.ts"]
+  "plugin": ["./agmsg-opencode-plugin/index.ts"]
 }
 JSON
 

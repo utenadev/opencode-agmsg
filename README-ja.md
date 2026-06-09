@@ -1,4 +1,4 @@
-# opencode-agmsg
+# agmsg-opencode-plugin
 
 [README in English](README.md)
 
@@ -24,7 +24,7 @@
 ### 1. OpenCode ワークスペースへの配置
 
 ```bash
-mkdir -p /your/workspace/.opencode/plugins/opencode-agmsg
+mkdir -p /your/workspace/.opencode/plugins/agmsg-opencode-plugin
 # index.ts を上記ディレクトリに配置
 ```
 
@@ -35,7 +35,7 @@ mkdir -p /your/workspace/.opencode/plugins/opencode-agmsg
 ```json
 {
   "plugin": [
-    "./.opencode/plugins/opencode-agmsg/index.ts"
+    "./.opencode/plugins/agmsg-opencode-plugin/index.ts"
   ]
 }
 ```

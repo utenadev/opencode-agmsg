@@ -1,5 +1,5 @@
 {
-  "name": "opencode-agmsg",
+  "name": "agmsg-opencode-plugin",
   "version": "1.0.0",
   "description": "Native SQLite3 agmsg integration for OpenCode AI engine",
   "main": "index.ts",
