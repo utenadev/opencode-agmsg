@@ -46,11 +46,20 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
   db.run("PRAGMA journal_mode = WAL");
 
   const peekStmt = db.query(`
+    SELECT 1 FROM messages
+    WHERE team = ?
+      AND (to_agent = ? OR to_agent = 'ALL')
+      AND read_at IS NULL
+    LIMIT 1
+  `);
+
+  // Returns the newest unread message ID and from_agent (for idle notification dedup)
+  const peekNewestStmt = db.query(`
     SELECT id, from_agent FROM messages
     WHERE team = ?
       AND (to_agent = ? OR to_agent = 'ALL')
       AND read_at IS NULL
-    ORDER BY id ASC
+    ORDER BY id DESC
     LIMIT 1
   `);
 
@@ -80,7 +89,7 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
 
   const pollTimer = setInterval(() => {
     try {
-      const row = peekStmt.get(teamName, agentName) as { id: number; from_agent: string } | undefined;
+      const row = peekNewestStmt.get(teamName, agentName) as { id: number; from_agent: string } | undefined;
       if (row && row.id > lastNotifiedId) {
         hasPendingMessages = true;
         lastNotifiedId = row.id;
