@@ -30,6 +30,11 @@ echo "Temp workspace: $E2E_DIR"
 
 mkdir -p "$PLUGIN_DIR"
 cp "$ROOT_DIR/index.ts" "$PLUGIN_DIR/index.ts"
+# Copy node_modules so runtime imports (e.g. @opencode-ai/plugin tool helper) resolve
+if [ -d "$ROOT_DIR/node_modules/@opencode-ai" ]; then
+  mkdir -p "$PLUGIN_DIR/node_modules"
+  cp -r "$ROOT_DIR/node_modules/@opencode-ai" "$PLUGIN_DIR/node_modules/@opencode-ai"
+fi
 
 cat > "$E2E_DIR/opencode.json" <<JSON
 {

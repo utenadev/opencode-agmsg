@@ -1,4 +1,5 @@
 import type { Plugin, Hooks } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
 import { Database } from "bun:sqlite";
 import os from "os";
 import path from "path";
@@ -78,6 +79,11 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
     RETURNING id, team, from_agent, to_agent, body, created_at, read_at
   `);
 
+  const sendStmt = db.query(`
+    INSERT INTO messages (team, from_agent, to_agent, body, created_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `);
+
   let hasPendingMessages = false;
   let lastCheckTime = 0;
   let lastNotifiedId = 0;
@@ -128,6 +134,25 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
         console.error("[agmsg-opencode-plugin] Fatal:", error);
         throw error;
       }
+    },
+    tool: {
+      send_agmsg: tool({
+        description: "Send a message to another agent on the same agmsg team. The AI should use this tool when it needs to communicate with other agents (review requests, status updates, handoffs, etc.).",
+        args: {
+          to_agent: tool.schema.string().describe("Target agent name (e.g. 'qwen', 'gemini-cli')"),
+          body: tool.schema.string().describe("Message content (markdown supported)"),
+        },
+        execute: async (args) => {
+          try {
+            sendStmt.run(teamName, agentName, args.to_agent, args.body);
+            log(`[agmsg-opencode-plugin] Sent message to ${args.to_agent}`);
+            return { output: `✅ Message sent to ${args.to_agent}` };
+          } catch (error) {
+            log(`[agmsg-opencode-plugin] Send error: ${error}`);
+            throw error;
+          }
+        },
+      }),
     },
   };
 }
