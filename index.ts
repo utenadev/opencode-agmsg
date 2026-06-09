@@ -46,10 +46,11 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
   db.run("PRAGMA journal_mode = WAL");
 
   const peekStmt = db.query(`
-    SELECT 1 FROM messages
+    SELECT id, from_agent FROM messages
     WHERE team = ?
       AND (to_agent = ? OR to_agent = 'ALL')
       AND read_at IS NULL
+    ORDER BY id ASC
     LIMIT 1
   `);
 
@@ -75,12 +76,15 @@ export function createPlugin(options: PluginOptions = {}): Hooks {
 
   let hasPendingMessages = false;
   let lastCheckTime = 0;
+  let lastNotifiedId = 0;
 
   const pollTimer = setInterval(() => {
     try {
-      const row = peekStmt.get(teamName, agentName);
-      if (row) {
+      const row = peekStmt.get(teamName, agentName) as { id: number; from_agent: string } | undefined;
+      if (row && row.id > lastNotifiedId) {
         hasPendingMessages = true;
+        lastNotifiedId = row.id;
+        console.log(`    📩 [agmsg] ${row.from_agent} からメッセージが届きました`);
       }
     } catch (error) {
       log(`[agmsg-opencode-plugin] Poll error: ${error}`);
