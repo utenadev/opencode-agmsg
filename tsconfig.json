@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "esModuleInterop": true,
     "strict": true,
+    "types": ["bun-types"],
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },

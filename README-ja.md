@@ -2,17 +2,21 @@
 
 [README in English](README.md)
 
-[fujibee/agmsg](https://github.com/fujibee/agmsg) の SQLite アーキテクチャを利用し、OpenCode AI エージェントへ非同期に他のエージェントからのコンテキストを自動注入するネイティブプラグインです。
+[fujibee/agmsg](https://github.com/fujibee/agmsg) の SQLite アーキテクチャを利用し、OpenCode AI エージェントにマルチエージェント間メッセージングを提供するネイティブプラグインです。
 
-外部シェルスクリプトのラッパーとは異なり、OpenCode の Bun ランタイム内部からローカルの SQLite データベースに直接アクセスします。`UPDATE ... RETURNING` によるアトミックなメッセージ取得と WAL（Write-Ahead Logging）モードにより、安全かつ効率的なマルチエージェント連携を実現します。
+OpenCode の Bun ランタイムからローカルの SQLite データベースに直接アクセスし、`UPDATE ... RETURNING` によるアトミックなメッセージ取得と WAL モードにより、安全かつ効率的なマルチエージェント連携を実現します。
+
+**このプロジェクトは実験的です。アイデアがあれば試して、どんどん変わっていきます。**
 
 ## 主な特徴
 
-* **チャット履歴を汚さない注入**: `experimental.chat.system.transform` フックを利用し、AI のシステムプロンプトに透過的にコンテキストを追加します。
-* **ネイティブ実行**: プロセス起動オーバーヘッドが一切なく、`bun:sqlite` による同期的な SQLite 操作でミリ秒単位で完了。
-* **アトミックなメッセージ消費**: `UPDATE ... RETURNING` で 1 クエリに SELECT と UPDATE を統合し、競合状態を完全に排除。
-* **アイドル検知**: バックグラウンドタイマーが設定間隔で DB を監視。会話の合間に届いたメッセージは次回ターンでクールダウン待ちなしに即時注入されます。
-* **クールダウン制御**: アクティブな会話中の過剰な DB アクセスを防ぎます。
+* **アイドル時自律応答**: OpenCode がアイドル状態のときに他エージェントからメッセージが届くと、`session.idle` イベント + `client.session.promptAsync()` により**自動でターンが生成され、AI が自律的に応答**します。
+* **メッセージとしての注入**: `experimental.chat.messages.transform` フックにより、他エージェントからのメッセージを `{role:"user"}` として正規の会話メッセージとして注入。システムプロンプト領域を経由しないため、UI の破綻がありません。
+* **二段構えの配送保証**: バックグラウンドポーリング（アイドル検知用）+ `messages.transform` 内の DB 直接確認により、取りこぼしなく確実に配送。
+* **キューイング機構**: 会話中に届いたメッセージはキューに保持し、次の LLM コールで注入。アイドル時は即時 `promptAsync`。
+* **ネイティブ実行**: `bun:sqlite` によるプロセス起動オーバーヘッドゼロ。
+* **アトミックなメッセージ消費**: `UPDATE ... RETURNING` で 1 クエリに消費と既読マークを統合、競合状態を排除。
+* **安全機構**: 処理タイムアウト（30秒）/ 同一メッセージの二重処理防止 / 過剰な auto-trigger 防止（5秒間隔）/ `dispose` フックによる確実なクリーンアップ。
 
 ## 前提条件
 
@@ -44,17 +48,37 @@ mkdir -p /your/workspace/.opencode/plugins/agmsg-opencode-plugin
 
 ## 動作の流れ
 
+### アイドル時（ユーザー入力待ち）
+
 ```
-① プロンプト入力待ち（アイドル状態）
-② agmsg で他エージェントがメッセージ送信
-③ バックグラウンドポーリングが検知、キューに保持（プロンプトは空のまま）
-④ ユーザーがプロンプトを入力して Enter
-⑤ experimental.chat.system.transform フックが発火
-⑥ キューされたメッセージをシステムプロンプト先頭に注入
-⑦ 拡張されたプロンプトで AI が応答を生成
+① アイドル状態（session.idle イベント検知中）
+② 他エージェントが agmsg でメッセージを送信
+③ ポーリングタイマーが検知
+④ client.session.promptAsync() で新規ターンを生成
+⑤ AI が自律的にメッセージを処理
+⑥ 必要に応じて send_agmsg ツールで応答を返信
 ```
 
-**アイドル検知タイマー**（デフォルト30秒）がバックグラウンドで DB をポーリングし、新着メッセージがあれば `hasPendingMessages` フラグを立てます。次のプロンプトサイクル（ユーザーの送信）でフラグを検知し、クールダウンをスキップして即座に注入します。アクティブ会話中はクールダウン制御により過剰な DB アクセスを防ぎます。
+### 会話中（ユーザーがアクティブに操作中）
+
+```
+① ユーザーがプロンプトを入力中、会話進行中
+② 他エージェントからメッセージが届く
+③ ポーリングタイマーが検知、キューに保持
+④ 次の LLM コール時、messages.transform フックが発火
+⑤ キューされたメッセージを {role:"user"} としてメッセージリストに注入
+⑥ AI が拡張されたコンテキストで応答を生成
+```
+
+### ワンショット（opencode run 時）
+
+```
+① opencode run "prompt" 実行
+② プラグインロード、DB 接続
+③ messages.transform フックが発火 → DB を直接確認
+④ 未読メッセージがあれば消費し、ユーザーメッセージとして注入
+⑤ LLM コール、応答生成
+```
 
 ## 環境変数
 
@@ -63,16 +87,32 @@ mkdir -p /your/workspace/.opencode/plugins/agmsg-opencode-plugin
 | `AGMSG_TEAM` | `default_team` | メッセージルーティング対象のチーム |
 | `AGMSG_AGENT` | `opencode` | エージェント名（agmsg の `to_agent` と一致させる） |
 | `AGMSG_DB_PATH` | `~/.agents/skills/agmsg/db/messages.db` | agmsg SQLite データベースのパス |
-| `AGMSG_COOLDOWN_MS` | `60000` | プロンプトサイクル毎の最小ポーリング間隔（ミリ秒） |
 | `AGMSG_WATCH_INTERVAL` | `30` | アイドル検知のポーリング間隔（秒） |
 
 例:
 
 ```bash
 export AGMSG_TEAM="frontend-refactor-crew"
-export AGMSG_COOLDOWN_MS=30000
 export AGMSG_WATCH_INTERVAL=10
 ```
+
+## v1 → v2 変更履歴
+
+| 項目 | v1 | v2 |
+|------|----|----|
+| **注入方式** | `system.transform` にメッセージ本文を直追加 | `messages.transform` で `{role:"user"}` として注入 |
+| **自律動作** | ❌ 不可 | ✅ `promptAsync` でアイドル時自動応答 |
+| **DB 確認** | ポーリングタイマーのみ（取りこぼしあり） | ポーリング + フック内直接確認（二段構え） |
+| **クールダウン** | `AGMSG_COOLDOWN_MS` で制御 | 削除（不要） |
+| **クリーンアップ** | なし | `dispose` フックあり |
+| **UI 破綻** | あり（Z軸問題） | なし |
+
+## 制約 / 既知の問題
+
+- `promptAsync` は 204 No Content で即時復帰する fire-and-forget 型。OpenCode サーバーが実際に処理したかは保証されない（受け付けたことのみ保証）
+- `session.idle` イベントに依存。OpenCode のバージョンや実行モードによっては期待通り動作しない可能性がある
+- `send_agmsg` による送信は成功確認をしていない（SQLite の制約エラーのみ検知）
+- アイドル検知はデフォルト30秒間隔。即時性が必要な場合は `AGMSG_WATCH_INTERVAL` を短く設定
 
 ## 謝辞
 
@@ -85,6 +125,6 @@ MIT です。
 
 ## Contribute
 
-絶賛大募集です。作り始めて5時間、Dog foodingも足りないので協力お願いしたいです。
+絶賛大募集です。このプロジェクトはアイデアがあれば試して変わっていきます。Issue / PR お待ちしています。
 
 
