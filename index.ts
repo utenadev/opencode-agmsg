@@ -120,6 +120,7 @@ export function createPlugin(client: {
   }
 
   function flushQueue(): void {
+    if (Date.now() - lastAutoTriggerTime < MIN_AUTO_INTERVAL_MS) return;
     while (pendingMessages.length > 0 && !isProcessing) {
       const msg = pendingMessages.shift()!;
       autoProcess(msg);
@@ -133,7 +134,7 @@ export function createPlugin(client: {
         sessionID = sessions[0].id;
         log(`[agmsg] Session: ${sessionID}`);
       }
-    }).catch(() => {});
+    }).catch((err) => log(`[agmsg] Session list error: ${err}`));
   } catch (e) {
     log(`[agmsg] Session init skipped: ${e}`);
   }
@@ -142,7 +143,7 @@ export function createPlugin(client: {
     try {
       const n = countMyUnread(db, cfg);
       if (n > 0) {
-        console.log(`    📩 [agmsg] ${n}件の新着メッセージ`);
+        log(`📩 [agmsg] ${n}件の新着メッセージ`);
         onNewMessage();
       }
     } catch (e) {
@@ -209,7 +210,7 @@ export function createPlugin(client: {
           to_agent: tool.schema.string().describe("Target agent name (e.g. 'agent-b', 'gemini-cli')"),
           body: tool.schema.string().describe("Message content (markdown supported)"),
         },
-        execute: async (args) => {
+        execute: async (args): Promise<{ output: string }> => {
           sendMessage(db, cfg, args.to_agent, args.body);
           log(`[agmsg] Sent → ${args.to_agent}`);
           return { output: `Message sent to ${args.to_agent}` };
@@ -219,7 +220,7 @@ export function createPlugin(client: {
       agmsg_inbox: tool({
         description: "List unread messages addressed to you. Returns messages from other agents that haven't been read yet. Messages are automatically marked as read after being injected into conversation, so use this to proactively check for new messages.",
         args: {},
-        execute: async () => {
+        execute: async (): Promise<{ output: string }> => {
           const rows = listMyUnread(db, cfg);
           if (rows.length === 0) return { output: "No unread messages." };
           const lines = rows.map((m: AgmsgMessage) =>
@@ -232,7 +233,7 @@ export function createPlugin(client: {
       agmsg_team: tool({
         description: "List all agents in the current agmsg team.",
         args: {},
-        execute: async () => {
+        execute: async (): Promise<{ output: string }> => {
           const configPath = path.join(TEAMS_DIR, teamName, "config.json");
           if (!fs.existsSync(configPath)) {
             return { output: `Team config not found at ${configPath}` };
@@ -250,7 +251,7 @@ export function createPlugin(client: {
           limit: tool.schema.number().optional().default(20).describe("Number of recent messages to show (default 20)"),
           agent: tool.schema.string().optional().describe("Filter by agent name (from or to)"),
         },
-        execute: async (args) => {
+        execute: async (args): Promise<{ output: string }> => {
           const limit = typeof args.limit === "number" ? args.limit : 20;
           const rows = getHistory(db, cfg, limit);
           if (rows.length === 0) return { output: "No messages found." };

@@ -19,7 +19,9 @@
     "test:e2e": "./scripts/e2e.sh",
     "typecheck": "bun x tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "agmsg-common-plugin": "file:../agmsg-common-plugin"
+  },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.2.0",
     "bun-types": "^1.3.0",
