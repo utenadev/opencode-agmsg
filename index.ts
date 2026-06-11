@@ -1,19 +1,19 @@
 import type { Plugin, Hooks } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
-import { Database } from "bun:sqlite";
 import os from "os";
 import path from "path";
 import fs from "fs";
 
-interface AgmsgMessage {
-  id: number;
-  team: string;
-  from_agent: string;
-  to_agent: string;
-  body: string;
-  created_at: string;
-  read_at: string | null;
-}
+import {
+  openDb,
+  consumeMyNextMessage,
+  sendMessage,
+  listMyUnread,
+  getHistory,
+  countMyUnread,
+  NOTIFICATION,
+} from "../agmsg-common-plugin/src/index.js";
+import type { AgmsgMessage, PluginConfig } from "../agmsg-common-plugin/src/types.js";
 
 const AGMSG_DIR = path.join(os.homedir(), ".agents", "skills", "agmsg");
 const DEFAULT_DB_PATH = path.join(AGMSG_DIR, "db", "messages.db");
@@ -47,43 +47,8 @@ export function createPlugin(client: {
     return {};
   }
 
-  const db = new Database(dbPath);
-  db.run("PRAGMA journal_mode = WAL");
-
-  const hasUnreadStmt = db.query(`
-    SELECT COUNT(*) as count FROM messages
-    WHERE team = ? AND (to_agent = ? OR to_agent = 'ALL') AND read_at IS NULL
-  `);
-
-  const consumeStmt = db.query(`
-    UPDATE messages SET read_at = datetime('now')
-    WHERE id = (
-      SELECT id FROM messages
-      WHERE team = ? AND (to_agent = ? OR to_agent = 'ALL') AND read_at IS NULL
-      ORDER BY created_at ASC LIMIT 1
-    )
-    RETURNING id, team, from_agent, to_agent, body, created_at, read_at
-  `);
-
-  const sendStmt = db.query(`
-    INSERT INTO messages (team, from_agent, to_agent, body, created_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
-  `);
-
-  const inboxStmt = db.query(`
-    SELECT id, team, from_agent, to_agent, body, created_at, read_at
-    FROM messages
-    WHERE team = ? AND (to_agent = ? OR to_agent = 'ALL') AND read_at IS NULL
-    ORDER BY created_at ASC
-  `);
-
-  const historyStmt = db.query(`
-    SELECT id, team, from_agent, to_agent, body, created_at, read_at
-    FROM messages
-    WHERE team = ?
-    ORDER BY created_at DESC
-    LIMIT ?
-  `);
+  const db = openDb(dbPath);
+  const cfg: PluginConfig = { dbPath, teamName, agentName };
 
   let sessionID: string | undefined;
   let isIdle = true;
@@ -93,13 +58,9 @@ export function createPlugin(client: {
 
   const pendingMessages: AgmsgMessage[] = [];
 
-  function formatMessage(msg: AgmsgMessage): string {
-    return `[agmsg] Message from "${msg.from_agent}":\n---\n${msg.body}\n---\nReply using the send_agmsg tool if appropriate.`;
-  }
-
   function consumeNext(): AgmsgMessage | undefined {
     try {
-      return consumeStmt.get(teamName, agentName) as AgmsgMessage | undefined;
+      return consumeMyNextMessage(db, cfg) ?? undefined;
     } catch (e) {
       log(`[agmsg] consume error: ${e}`);
       return undefined;
@@ -133,7 +94,7 @@ export function createPlugin(client: {
       await client.session.promptAsync({
         path: { id: sessionID },
         body: {
-          parts: [{ type: "text", text: formatMessage(msg) }],
+          parts: [{ type: "text", text: NOTIFICATION(msg.from_agent, msg.body) }],
         },
       });
       log(`[agmsg] promptAsync sent for #${msg.id}`);
@@ -179,9 +140,9 @@ export function createPlugin(client: {
 
   const pollTimer = setInterval(() => {
     try {
-      const result = hasUnreadStmt.get(teamName, agentName) as { count: number };
-      if (result.count > 0) {
-        console.log(`    📩 [agmsg] ${result.count}件の新着メッセージ`);
+      const n = countMyUnread(db, cfg);
+      if (n > 0) {
+        console.log(`    📩 [agmsg] ${n}件の新着メッセージ`);
         onNewMessage();
       }
     } catch (e) {
@@ -227,7 +188,7 @@ export function createPlugin(client: {
       for (const msg of batch) {
         (output.messages as any[]).push({
           info: { role: "user" },
-          parts: [{ type: "text", text: formatMessage(msg) }],
+          parts: [{ type: "text", text: NOTIFICATION(msg.from_agent, msg.body) }],
         });
       }
     },
@@ -249,7 +210,7 @@ export function createPlugin(client: {
           body: tool.schema.string().describe("Message content (markdown supported)"),
         },
         execute: async (args) => {
-          sendStmt.run(teamName, agentName, args.to_agent, args.body);
+          sendMessage(db, cfg, args.to_agent, args.body);
           log(`[agmsg] Sent → ${args.to_agent}`);
           return { output: `Message sent to ${args.to_agent}` };
         },
@@ -259,7 +220,7 @@ export function createPlugin(client: {
         description: "List unread messages addressed to you. Returns messages from other agents that haven't been read yet. Messages are automatically marked as read after being injected into conversation, so use this to proactively check for new messages.",
         args: {},
         execute: async () => {
-          const rows = inboxStmt.all(teamName, agentName) as AgmsgMessage[];
+          const rows = listMyUnread(db, cfg);
           if (rows.length === 0) return { output: "No unread messages." };
           const lines = rows.map((m: AgmsgMessage) =>
             `[#${m.id}] ${m.created_at} from ${m.from_agent}: ${m.body}`
@@ -291,7 +252,7 @@ export function createPlugin(client: {
         },
         execute: async (args) => {
           const limit = typeof args.limit === "number" ? args.limit : 20;
-          const rows = historyStmt.all(teamName, limit) as AgmsgMessage[];
+          const rows = getHistory(db, cfg, limit);
           if (rows.length === 0) return { output: "No messages found." };
           let filtered = rows;
           if (args.agent) {
