@@ -12,8 +12,8 @@ import {
   getHistory,
   countMyUnread,
   NOTIFICATION,
-} from "../agmsg-common-plugin/src/index.js";
-import type { AgmsgMessage, PluginConfig } from "../agmsg-common-plugin/src/types.js";
+} from "agmsg-common-plugin";
+import type { AgmsgMessage, PluginConfig } from "agmsg-common-plugin";
 
 const AGMSG_DIR = path.join(os.homedir(), ".agents", "skills", "agmsg");
 const DEFAULT_DB_PATH = path.join(AGMSG_DIR, "db", "messages.db");
@@ -143,7 +143,7 @@ export function createPlugin(client: {
     try {
       const n = countMyUnread(db, cfg);
       if (n > 0) {
-        log(`📩 [agmsg] ${n}件の新着メッセージ`);
+        log(`📩 [agmsg] ${n} new message(s)`);
         onNewMessage();
       }
     } catch (e) {
