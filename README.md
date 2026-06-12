@@ -62,8 +62,7 @@ Add to your `opencode.json`:
 |----------|---------|-------------|
 | `AGMSG_TEAM` | `default_team` | Team namespace for message routing |
 | `AGMSG_AGENT` | `opencode` | Agent name (must match the `to_agent` in agmsg messages) |
-| `AGMSG_DB_PATH` | `~/.agents/skills/agmsg/db/messages.db` | Path to the agmsg SQLite database |
-| `AGMSG_COOLDOWN_MS` | `60000` | Minimum interval (ms) between prompt-cycle DB polls |
+| `AGMSG_STORAGE_PATH` | `~/.agents/skills/agmsg` | Base directory for agmsg data (`db/messages.db` is appended) |
 | `AGMSG_WATCH_INTERVAL` | `30` | Background poll interval (seconds) for idle detection |
 
 Example:

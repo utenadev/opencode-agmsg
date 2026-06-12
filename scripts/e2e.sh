@@ -44,8 +44,9 @@ cat > "$E2E_DIR/opencode.json" <<JSON
 }
 JSON
 
-# Create test agmsg database
-DB_PATH="$E2E_DIR/agmsg_e2e.db"
+# Create test agmsg database (must match default path: <storagePath>/db/messages.db)
+mkdir -p "$E2E_DIR/db"
+DB_PATH="$E2E_DIR/db/messages.db"
 sqlite3 "$DB_PATH" <<'SQL'
 PRAGMA journal_mode=WAL;
 CREATE TABLE messages (
@@ -68,14 +69,14 @@ sqlite3 "$DB_PATH" "SELECT id, team, from_agent, to_agent, body, read_at FROM me
 
 echo ""
 echo "[exec] opencode run \"hello\" --print-logs"
-echo "       AGMSG_TEAM=$TEAM AGMSG_DB_PATH=$DB_PATH"
+echo "       AGMSG_TEAM=$TEAM AGMSG_STORAGE_PATH=$E2E_DIR"
 echo ""
 
 set +e
 STDERR_LOG=$(mktemp)
 cd "$E2E_DIR" && \
   AGMSG_TEAM="$TEAM" \
-  AGMSG_DB_PATH="$DB_PATH" \
+  AGMSG_STORAGE_PATH="$E2E_DIR" \
   opencode run "hello" --print-logs >/dev/null 2>"$STDERR_LOG"
 RC=$?
 set -e

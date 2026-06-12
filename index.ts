@@ -15,9 +15,7 @@ import {
 } from "agmsg-common-plugin";
 import type { AgmsgMessage, PluginConfig } from "agmsg-common-plugin";
 
-const AGMSG_DIR = path.join(os.homedir(), ".agents", "skills", "agmsg");
-const DEFAULT_DB_PATH = path.join(AGMSG_DIR, "db", "messages.db");
-const TEAMS_DIR = path.join(AGMSG_DIR, "teams");
+const DEFAULT_STORAGE_PATH = path.join(os.homedir(), ".agents", "skills", "agmsg");
 
 interface PluginOptions {
   dbPath?: string;
@@ -36,7 +34,8 @@ export function createPlugin(client: {
     promptAsync: (opts: any) => Promise<any>;
   };
 }, options: PluginOptions = {}): Hooks {
-  const dbPath = options.dbPath ?? process.env.AGMSG_DB_PATH ?? DEFAULT_DB_PATH;
+  const storagePath = process.env.AGMSG_STORAGE_PATH ?? DEFAULT_STORAGE_PATH;
+  const dbPath = options.dbPath ?? path.join(storagePath, "db", "messages.db");
   const teamName = options.teamName ?? process.env.AGMSG_TEAM ?? "default_team";
   const agentName = options.agentName ?? process.env.AGMSG_AGENT ?? "opencode";
   const pollIntervalMs = options.pollIntervalMs ?? parseInt(process.env.AGMSG_WATCH_INTERVAL || "30000", 10);
@@ -234,7 +233,7 @@ export function createPlugin(client: {
         description: "List all agents in the current agmsg team.",
         args: {},
         execute: async (): Promise<{ output: string }> => {
-          const configPath = path.join(TEAMS_DIR, teamName, "config.json");
+          const configPath = path.join(storagePath, "teams", teamName, "config.json");
           if (!fs.existsSync(configPath)) {
             return { output: `Team config not found at ${configPath}` };
           }

@@ -87,7 +87,7 @@ mkdir -p /your/workspace/.opencode/plugins/agmsg-opencode-plugin
 |------|-------------|------|
 | `AGMSG_TEAM` | `default_team` | メッセージルーティング対象のチーム |
 | `AGMSG_AGENT` | `opencode` | エージェント名（agmsg の `to_agent` と一致させる） |
-| `AGMSG_DB_PATH` | `~/.agents/skills/agmsg/db/messages.db` | agmsg SQLite データベースのパス |
+| `AGMSG_STORAGE_PATH` | `~/.agents/skills/agmsg` | agmsg データのベースディレクトリ（内部で `/db/messages.db` が追加される） |
 | `AGMSG_WATCH_INTERVAL` | `30` | アイドル検知のポーリング間隔（秒） |
 
 例:
