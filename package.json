@@ -20,7 +20,7 @@
     "typecheck": "bun x tsc --noEmit"
   },
   "dependencies": {
-    "agmsg-common-plugin": "git+https://github.com/utenadev/agmsg-common-plugin.git#3b70038"
+    "agmsg-common-plugin": "git+https://github.com/utenadev/agmsg-common-plugin.git#v1.0.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.2.0",
