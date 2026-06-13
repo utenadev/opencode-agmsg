@@ -17,7 +17,7 @@ Unlike traditional shell-wrapper mechanisms that cause process fork inflation, t
 ## Prerequisites
 
 * OpenCode v1.16.2+
-* `agmsg` with a SQLite database at the default path (or custom via `AGMSG_DB_PATH`)
+* `agmsg` with a SQLite database at the default path (or custom via `AGMSG_STORAGE_PATH`)
 
 ## Installation
 
@@ -25,7 +25,7 @@ Unlike traditional shell-wrapper mechanisms that cause process fork inflation, t
 
 ```bash
 mkdir -p /your/workspace/.opencode/plugins/agmsg-opencode-plugin
-# Copy index.ts into the directory above
+cp index.ts common.ts /your/workspace/.opencode/plugins/agmsg-opencode-plugin/
 ```
 
 ### 2. Register the Plugin
@@ -40,7 +40,7 @@ Add to your `opencode.json`:
 }
 ```
 
-**No `npm install` required.** The plugin uses `bun:sqlite`, which is built into OpenCode's Bun runtime.
+**No `npm install` / `bun install` required.** The plugin is self-contained — `index.ts` + `common.ts` only. Both use `bun:sqlite`, which is built into OpenCode's Bun runtime.
 
 ## Injection Flow
 
@@ -63,14 +63,13 @@ Add to your `opencode.json`:
 | `AGMSG_TEAM` | `default_team` | Team namespace for message routing |
 | `AGMSG_AGENT` | `opencode` | Agent name (must match the `to_agent` in agmsg messages) |
 | `AGMSG_STORAGE_PATH` | `~/.agents/skills/agmsg` | Base directory for agmsg data (`db/messages.db` is appended) |
-| `AGMSG_WATCH_INTERVAL` | `30` | Background poll interval (seconds) for idle detection |
+| `AGMSG_WATCH_INTERVAL` | `30000` | Background poll interval (milliseconds) for idle detection |
 
 Example:
 
 ```bash
 export AGMSG_TEAM="frontend-refactor-crew"
-export AGMSG_COOLDOWN_MS=30000
-export AGMSG_WATCH_INTERVAL=10
+export AGMSG_WATCH_INTERVAL=10000
 ```
 
 ## Acknowledgments
@@ -84,4 +83,4 @@ MIT
 
 ## Contribute
 
-We warmly welcome contributors. This project is only 5 hours old and needs more dogfooding — your help is greatly appreciated.
+We warmly welcome contributors.

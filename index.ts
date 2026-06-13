@@ -12,8 +12,8 @@ import {
   getHistory,
   countMyUnread,
   NOTIFICATION,
-} from "agmsg-common-plugin";
-import type { AgmsgMessage, PluginConfig } from "agmsg-common-plugin";
+} from "./common.js";
+import type { AgmsgMessage, PluginConfig } from "./common.js";
 
 const DEFAULT_STORAGE_PATH = path.join(os.homedir(), ".agents", "skills", "agmsg");
 
@@ -233,7 +233,12 @@ export function createPlugin(client: {
         description: "List all agents in the current agmsg team.",
         args: {},
         execute: async (): Promise<{ output: string }> => {
-          const configPath = path.join(storagePath, "teams", teamName, "config.json");
+          const teamsDir = path.resolve(storagePath, "teams");
+          // nosemgrep: path-join-resolve-traversal — validated below
+          const configPath = path.resolve(teamsDir, teamName, "config.json");
+          if (!configPath.startsWith(teamsDir + path.sep)) {
+            return { output: `Invalid team name: ${teamName}` };
+          }
           if (!fs.existsSync(configPath)) {
             return { output: `Team config not found at ${configPath}` };
           }
@@ -271,8 +276,8 @@ export function createPlugin(client: {
   };
 }
 
-export const OpenCodeAgmsgPlugin: Plugin = async (input) => {
+const OpenCodeAgmsgPlugin: Plugin = async (input) => {
   return createPlugin(input.client);
 };
 
-export default OpenCodeAgmsgPlugin;
+export default { id: "agmsg", server: OpenCodeAgmsgPlugin };

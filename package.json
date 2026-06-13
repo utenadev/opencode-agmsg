@@ -19,9 +19,7 @@
     "test:e2e": "./scripts/e2e.sh",
     "typecheck": "bun x tsc --noEmit"
   },
-  "dependencies": {
-    "agmsg-common-plugin": "git+https://github.com/utenadev/agmsg-common-plugin.git#v1.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@opencode-ai/plugin": "^1.2.0",
     "bun-types": "^1.3.0",

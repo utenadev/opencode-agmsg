@@ -30,13 +30,15 @@ echo "Temp workspace: $E2E_DIR"
 
 mkdir -p "$PLUGIN_DIR"
 cp "$ROOT_DIR/index.ts" "$PLUGIN_DIR/index.ts"
-# Copy minimal node_modules for runtime imports (tool helper, zod)
+# Copy minimal node_modules for runtime imports (tool helper, zod, agmsg-common-plugin)
 if [ -d "$ROOT_DIR/node_modules" ]; then
   mkdir -p "$PLUGIN_DIR/node_modules"
   for pkg in @opencode-ai zod; do
     [ -d "$ROOT_DIR/node_modules/$pkg" ] && cp -r "$ROOT_DIR/node_modules/$pkg" "$PLUGIN_DIR/node_modules/$pkg"
   done
 fi
+# Copy common.ts (local, no package dependency)
+cp "$ROOT_DIR/common.ts" "$PLUGIN_DIR/common.ts"
 
 cat > "$E2E_DIR/opencode.json" <<JSON
 {
@@ -77,6 +79,7 @@ STDERR_LOG=$(mktemp)
 cd "$E2E_DIR" && \
   AGMSG_TEAM="$TEAM" \
   AGMSG_STORAGE_PATH="$E2E_DIR" \
+  AGMSG_WATCH_INTERVAL=999999 \
   opencode run "hello" --print-logs >/dev/null 2>"$STDERR_LOG"
 RC=$?
 set -e
@@ -98,22 +101,25 @@ else
   PASS=$((PASS + 1))
 fi
 
-# Check plugin was loaded
-if grep -q "loading plugin" "$STDERR_LOG"; then
-  echo "[PASS] Plugin was loaded by opencode"
-  PASS=$((PASS + 1))
-else
-  echo "[FAIL] Plugin was not loaded"
-  FAIL=$((FAIL + 1))
-fi
-
-# Check the message was consumed (read_at is set)
+# Check message consumption (proves plugin transform hook ran)
 READ_AT=$(sqlite3 "$DB_PATH" "SELECT read_at FROM messages WHERE team='$TEAM' AND to_agent='$AGENT'")
 if [ -n "$READ_AT" ]; then
   echo "[PASS] Message was marked as read (read_at=$READ_AT)"
   PASS=$((PASS + 1))
 else
   echo "[FAIL] Message was NOT marked as read"
+  FAIL=$((FAIL + 1))
+fi
+
+# Check plugin was loaded (v1.16.x: "loading plugin" log; v1.17.x: no explicit log)
+if grep -q "loading plugin" "$STDERR_LOG"; then
+  echo "[PASS] Plugin was loaded by opencode (v1.16.x style)"
+  PASS=$((PASS + 1))
+elif [ -n "$READ_AT" ]; then
+  echo "[PASS] Plugin was loaded (confirmed by message consumption)"
+  PASS=$((PASS + 1))
+else
+  echo "[FAIL] Plugin was not loaded"
   FAIL=$((FAIL + 1))
 fi
 

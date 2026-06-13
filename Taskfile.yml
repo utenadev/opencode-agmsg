@@ -42,6 +42,11 @@ tasks:
     cmds:
       - uv run --with semgrep semgrep scan --config auto
 
+  gitleaks:
+    desc: Run gitleaks secret detection
+    cmds:
+      - gitleaks detect --no-git --verbose
+
   clean:
     desc: Remove node_modules and lockfile
     cmds:

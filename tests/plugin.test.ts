@@ -1,8 +1,8 @@
-import { describe, it, expect, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join } from "path";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { createPlugin } from "../index.ts";
 
 // Prevent background polling timers from interfering with tests
@@ -329,5 +329,192 @@ describe("createPlugin()", () => {
     expect(countRead(dbPath)).toBe(1);
 
     rmSync(join(dbPath, ".."), { recursive: true, force: true });
+  });
+
+  describe("send_agmsg tool", () => {
+    it("writes a message to the database", async () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      await hooks.tool!.send_agmsg.execute({ to_agent: "gemini", body: "Hello from opencode" });
+      const result = await hooks.tool!.agmsg_inbox.execute({});
+      expect(result.output).toBe("No unread messages.");
+
+      // Verify from gemini's perspective
+      const db = new Database(dbPath);
+      const row = db.query("SELECT from_agent, to_agent, body FROM messages WHERE to_agent = ?").get("gemini") as any;
+      db.close();
+      expect(row).not.toBeUndefined();
+      expect(row.from_agent).toBe(AGENT);
+      expect(row.to_agent).toBe("gemini");
+      expect(row.body).toBe("Hello from opencode");
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("forces from_agent to the configured agent name", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      hooks.tool!.send_agmsg.execute({ to_agent: "qwen", body: "Cannot spoof" });
+      const db = new Database(dbPath);
+      const rows = db.query("SELECT from_agent, to_agent, body FROM messages").all() as any[];
+      db.close();
+      expect(rows.length).toBe(1);
+      expect(rows[0].from_agent).toBe(AGENT);
+      expect(rows[0].from_agent).not.toBe("qwen");
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("sends to ALL when to_agent is ALL", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      hooks.tool!.send_agmsg.execute({ to_agent: "ALL", body: "Broadcast" });
+      const db = new Database(dbPath);
+      const row = db.query("SELECT to_agent, body FROM messages").get() as any;
+      db.close();
+      expect(row.to_agent).toBe("ALL");
+      expect(row.body).toBe("Broadcast");
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+  });
+
+  describe("agmsg_team tool", () => {
+    it("reads agents from team config file", async () => {
+      const dbPath = freshDb();
+      const storageDir = join(dbPath, "..", "agmsg-storage");
+      const teamDir = join(storageDir, "teams", "test-team-cfg");
+      mkdirSync(teamDir, { recursive: true });
+      writeFileSync(join(teamDir, "config.json"), JSON.stringify({
+        agents: { opencode: {}, gemini: {}, qwen: {} },
+      }));
+      process.env.AGMSG_STORAGE_PATH = storageDir;
+      try {
+        const hooks = createPlugin(dummyClient(), { dbPath, teamName: "test-team-cfg", agentName: AGENT });
+        const result = await hooks.tool!.agmsg_team.execute({});
+        expect(result.output).toContain("opencode");
+        expect(result.output).toContain("gemini");
+        expect(result.output).toContain("qwen");
+      } finally {
+        delete process.env.AGMSG_STORAGE_PATH;
+        rmSync(join(dbPath, ".."), { recursive: true, force: true });
+      }
+    });
+
+    it("returns 'No agents' when config has empty agents", async () => {
+      const dbPath = freshDb();
+      const storageDir = join(dbPath, "..", "agmsg-storage");
+      const teamDir = join(storageDir, "teams", "empty-team");
+      mkdirSync(teamDir, { recursive: true });
+      writeFileSync(join(teamDir, "config.json"), JSON.stringify({ agents: {} }));
+      process.env.AGMSG_STORAGE_PATH = storageDir;
+      try {
+        const hooks = createPlugin(dummyClient(), { dbPath, teamName: "empty-team", agentName: AGENT });
+        const result = await hooks.tool!.agmsg_team.execute({});
+        expect(result.output).toBe("No agents in team.");
+      } finally {
+        delete process.env.AGMSG_STORAGE_PATH;
+        rmSync(join(dbPath, ".."), { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("event hooks", () => {
+    it("session.created sets sessionID", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      hooks.event!({ event: { type: "session.created", properties: { sessionID: "session-42" } } as any });
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("session.next sets isIdle to false", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      hooks.event!({ event: { type: "session.next.user-request" } as any });
+      hooks.event!({ event: { type: "session.next.assistant-response" } as any });
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("dispose cleans up without error", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      expect(async () => { await hooks.dispose?.(); }).not.toThrow();
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+  });
+
+  describe("messages.transform edge cases", () => {
+    it("mixes self-targeted and other-targeted messages", () => {
+      const dbPath = freshDb();
+      seed(dbPath, { team: TEAM, from_agent: "alice", to_agent: AGENT, body: "For me", created_at: "2024-01-01T00:00:00Z" });
+      seed(dbPath, { team: TEAM, from_agent: "bob", to_agent: "other-agent", body: "Not for me", created_at: "2024-01-02T00:00:00Z" });
+      seed(dbPath, { team: TEAM, from_agent: "carol", to_agent: "ALL", body: "Broadcast", created_at: "2024-01-03T00:00:00Z" });
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      const output = makeMessagesOutput();
+      hooks["experimental.chat.messages.transform"]?.({}, output);
+      expect(output.messages.length).toBe(2);
+      expect(output.messages[0].parts[0].text).toContain("alice");
+      expect(output.messages[0].parts[0].text).toContain("For me");
+      expect(output.messages[1].parts[0].text).toContain("carol");
+      expect(output.messages[1].parts[0].text).toContain("Broadcast");
+      expect(countRead(dbPath)).toBe(2);
+      expect(countUnread(dbPath)).toBe(1); // bob's message still unread
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("handles multiple ALL broadcasts in order", () => {
+      const dbPath = freshDb();
+      seed(dbPath, { team: TEAM, from_agent: "alice", to_agent: "ALL", body: "Broadcast 1", created_at: "2024-01-01T00:00:00Z" });
+      seed(dbPath, { team: TEAM, from_agent: "bob", to_agent: "ALL", body: "Broadcast 2", created_at: "2024-01-02T00:00:00Z" });
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      const output = makeMessagesOutput();
+      hooks["experimental.chat.messages.transform"]?.({}, output);
+      expect(output.messages.length).toBe(2);
+      expect(output.messages[0].parts[0].text).toContain("Broadcast 1");
+      expect(output.messages[1].parts[0].text).toContain("Broadcast 2");
+      expect(countRead(dbPath)).toBe(2);
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("transforms empty output when no unread messages", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      const output = makeMessagesOutput();
+      hooks["experimental.chat.messages.transform"]?.({}, output);
+      expect(output.messages.length).toBe(0);
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("includes pending messages from queue before DB consumption", () => {
+      const dbPath = freshDb();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      seed(dbPath, { team: TEAM, from_agent: "alice", to_agent: AGENT, body: "From DB" });
+      const output = makeMessagesOutput();
+      hooks["experimental.chat.messages.transform"]?.({}, output);
+      expect(output.messages.length).toBe(1);
+      expect(countRead(dbPath)).toBe(1);
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+  });
+
+  describe("agmsg_history tool", () => {
+    it("filters by both from_agent and to_agent", async () => {
+      const dbPath = freshDb();
+      seed(dbPath, { team: TEAM, from_agent: "alice", to_agent: "bob", body: "From alice", created_at: "2024-01-01T00:00:00Z" });
+      seed(dbPath, { team: TEAM, from_agent: "carol", to_agent: "alice", body: "To alice", created_at: "2024-01-02T00:00:00Z" });
+      seed(dbPath, { team: TEAM, from_agent: "dave", to_agent: "eve", body: "Not alice", created_at: "2024-01-03T00:00:00Z" });
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      const result = await hooks.tool!.agmsg_history.execute({ agent: "alice" });
+      expect(result.output).toContain("From alice");
+      expect(result.output).toContain("To alice");
+      expect(result.output).not.toContain("Not alice");
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+
+    it("works without agent filter", async () => {
+      const dbPath = freshDb();
+      seed(dbPath, { team: TEAM, from_agent: "alice", to_agent: "bob", body: "Hello", created_at: "2024-01-01T00:00:00Z" });
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+      const result = await hooks.tool!.agmsg_history.execute({});
+      expect(result.output).toContain("Hello");
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
   });
 });
