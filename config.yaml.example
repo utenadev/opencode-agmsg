@@ -1,0 +1,8 @@
+# agmsg-opencode-plugin configuration
+# Environment variables override these values.
+# Copy this file to config.yaml and edit,
+# or let the plugin auto-create it on first run (onboarding).
+
+team_name: "default_team"     # AGMSG_TEAM env var overrides this
+agent_name: "opencode"        # AGMSG_AGENT env var overrides this
+watch_interval: 30000         # AGMSG_WATCH_INTERVAL env var overrides this (milliseconds)

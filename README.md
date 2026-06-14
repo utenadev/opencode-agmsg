@@ -8,11 +8,14 @@ Unlike traditional shell-wrapper mechanisms that cause process fork inflation, t
 
 ## Architectural Advantages
 
-* **Hidden Context Injection**: Hooks into OpenCode's `experimental.chat.system.transform` lifecycle to append coordination context without polluting the visible UI chat transcript.
-* **Native Execution Model**: Zero external process overhead — all SQLite operations run synchronously in-process via `bun:sqlite`.
+* **Idle Auto-Response**: When OpenCode is idle and a message arrives, `session.idle` event + `client.session.promptAsync()` auto-generates a turn for autonomous AI response.
+* **Message-Level Injection**: `experimental.chat.messages.transform` hook injects messages as `{role:"user"}` into the proper message list, avoiding UI corruption from system prompt overload.
+* **Guaranteed Delivery**: Dual mechanism -- background polling (idle detection) + DB direct check inside `messages.transform` -- ensures no messages are missed.
+* **Queue During Conversation**: Messages arriving mid-conversation are queued and injected on the next LLM call. Idle messages trigger immediate `promptAsync`.
+* **Native Execution**: Zero external process overhead -- all SQLite operations run in-process via `bun:sqlite`.
 * **Atomic Message Consumption**: Uses `UPDATE ... RETURNING` to claim and read a message in a single query, eliminating race conditions in multi-agent environments.
-* **Idle Detection**: Background timer polls the database at a configurable interval. When a new message arrives between prompt cycles, it is queued and injected on the next turn without waiting for the cooldown gate.
-* **Cooldown Gating**: Configurable cooldown prevents repeated DB queries on every prompt cycle during active conversation.
+* **Safety Guards**: Processing timeout (30s), duplicate prevention, excessive auto-trigger prevention (5s interval), `dispose` hook for clean teardown.
+* **Self-Contained**: No dependencies. `index.ts` + `common.ts` only. No `npm install` / `bun install` required.
 
 ## Prerequisites
 
@@ -42,28 +45,70 @@ Add to your `opencode.json`:
 
 **No `npm install` / `bun install` required.** The plugin is self-contained — `index.ts` + `common.ts` only. Both use `bun:sqlite`, which is built into OpenCode's Bun runtime.
 
-## Injection Flow
+## Message Flow
+
+### Idle (waiting for user input)
 
 ```
-① Idle — waiting for user input
+① Idle detected (session.idle event)
 ② Another agent sends a message via agmsg
-③ Background polling timer detects the message, sets pending flag (prompt stays empty)
-④ User types a prompt and presses Enter
-⑤ experimental.chat.system.transform hook fires
-⑥ Queued message is injected at the top of the system prompt
-⑦ AI generates a response with the augmented context
+③ Polling timer detects the message
+④ client.session.promptAsync() generates a new turn
+⑤ AI autonomously processes the message
+⑥ Optionally replies using send_agmsg tool
 ```
 
-**Idle detection timer** (default 30s) polls the DB in the background. When a new message arrives, it sets `hasPendingMessages`. On the next prompt cycle (user submission), the fast path skips the cooldown gate and injects immediately. During active conversation, the cooldown gate prevents excessive DB queries.
+### Active Conversation (user is actively prompting)
+
+```
+① User is typing, conversation in progress
+② Another agent sends a message
+③ Polling timer detects, queued in pendingMessages[]
+④ Next LLM call triggers messages.transform hook
+⑤ Queued messages injected as {role:"user"} into the message list
+⑥ AI generates response with augmented context
+```
+
+### One-shot (opencode run)
+
+```
+① opencode run "prompt" executed
+② Plugin loads, connects to DB
+③ messages.transform hook fires, checks DB directly
+④ Unread messages consumed and injected as user messages
+⑤ LLM call, response generation
+```
 
 ## Configuration
 
+### Priority
+
+Settings resolution order (higher wins):
+
+```
+PluginOptions (createPlugin arg) > env vars > config.yaml > defaults
+```
+
+### config.yaml
+
+Persistent settings at `AGMSG_STORAGE_PATH/config.yaml`. **Auto-created on first run** (onboarding). Existing files are never overwritten.
+
+See `config.yaml.example`:
+
+```yaml
+team_name: "default_team"     # Overridden by AGMSG_TEAM
+agent_name: "opencode"        # Overridden by AGMSG_AGENT
+watch_interval: 30000         # Overridden by AGMSG_WATCH_INTERVAL (ms)
+```
+
+### Environment Variables
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGMSG_TEAM` | `default_team` | Team namespace for message routing |
-| `AGMSG_AGENT` | `opencode` | Agent name (must match the `to_agent` in agmsg messages) |
-| `AGMSG_STORAGE_PATH` | `~/.agents/skills/agmsg` | Base directory for agmsg data (`db/messages.db` is appended) |
-| `AGMSG_WATCH_INTERVAL` | `30000` | Background poll interval (milliseconds) for idle detection |
+| `AGMSG_TEAM` | config.yaml value or `default_team` | Team namespace for message routing |
+| `AGMSG_AGENT` | config.yaml value or `opencode` | Agent name (must match `to_agent` in agmsg messages) |
+| `AGMSG_STORAGE_PATH` | `~/.agents/skills/agmsg` | Base directory for agmsg data. **Not a file path** — the actual DB path is `{AGMSG_STORAGE_PATH}/db/messages.db` |
+| `AGMSG_WATCH_INTERVAL` | config.yaml value or `30000` | Background poll interval (ms) for idle detection |
 
 Example:
 

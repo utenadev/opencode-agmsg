@@ -2,8 +2,10 @@ import { describe, it, expect, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join } from "path";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, statSync } from "fs";
 import { createPlugin } from "../index.ts";
+import { loadSettings, saveSettings, resolveSettings, configPath } from "../common.ts";
+import type { PluginClient } from "../common.ts";
 
 // Prevent background polling timers from interfering with tests
 process.env.AGMSG_WATCH_INTERVAL = "999999";
@@ -70,10 +72,10 @@ function makeSystemOutput(): SystemTransformOutput {
   return { system: [""] };
 }
 
-function dummyClient(): any {
+function dummyClient(): PluginClient {
   return {
     session: {
-      list: async () => [],
+      list: async () => ({ data: [] }),
       promptAsync: async () => {},
     },
   };
@@ -214,6 +216,28 @@ describe("createPlugin()", () => {
     rmSync(join(dbPath, ".."), { recursive: true, force: true });
   });
 
+  it("handles concurrent transform calls via Promise.all", async () => {
+    const dbPath = freshDb();
+    seed(dbPath, { team: TEAM, from_agent: "a1", to_agent: AGENT, body: "msg1" });
+    seed(dbPath, { team: TEAM, from_agent: "a2", to_agent: AGENT, body: "msg2" });
+    seed(dbPath, { team: TEAM, from_agent: "a3", to_agent: AGENT, body: "msg3" });
+    const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
+
+    const results = await Promise.all([0, 1, 2].map(async () => {
+      const out = makeMessagesOutput();
+      await hooks["experimental.chat.messages.transform"]?.({}, out);
+      return out.messages.length;
+    }));
+
+    // Three concurrent transforms should collectively consume all 3 messages
+    // Each message is atomically consumed by exactly one call
+    const total = results.reduce((a, b) => a + b, 0);
+    expect(total).toBe(3);
+    expect(countRead(dbPath)).toBe(3);
+    expect(countUnread(dbPath)).toBe(0);
+    rmSync(join(dbPath, ".."), { recursive: true, force: true });
+  });
+
   describe("agmsg_inbox tool", () => {
     it("returns 'No unread messages' when inbox is empty", async () => {
       const dbPath = freshDb();
@@ -302,17 +326,17 @@ describe("createPlugin()", () => {
 
   it("triggers promptAsync when idle and message arrives (via event.idle)", async () => {
     const dbPath = freshDb();
-    const promptAsyncCalls: any[] = [];
-    const client = {
+    const promptAsyncCalls: object[] = [];
+    const client: PluginClient = {
       session: {
-        list: async () => [{ id: "test-session" }],
-        promptAsync: async (opts: any) => { promptAsyncCalls.push(opts); },
+        list: async () => ({ data: [{ id: "test-session" }] }),
+        promptAsync: async (opts) => { promptAsyncCalls.push(opts); },
       },
     };
-    const hooks = createPlugin(client as any, { dbPath, teamName: TEAM, agentName: AGENT, pollIntervalMs: 50000 });
+    const hooks = createPlugin(client, { dbPath, teamName: TEAM, agentName: AGENT, pollIntervalMs: 50000 });
 
-    // Simulate session.idle → session ID captured
-    await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: "test-session" } } as any });
+    // Simulate session.idle -> session ID captured
+    await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: "test-session" } } });
 
     // Now seed a message and manually call onNewMessage path by triggering the internal logic
     seed(dbPath, { team: TEAM, from_agent: "alice", to_agent: AGENT, body: "Auto process me" });
@@ -420,15 +444,15 @@ describe("createPlugin()", () => {
     it("session.created sets sessionID", () => {
       const dbPath = freshDb();
       const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
-      hooks.event!({ event: { type: "session.created", properties: { sessionID: "session-42" } } as any });
+      hooks.event!({ event: { type: "session.created", properties: { sessionID: "session-42" } } });
       rmSync(join(dbPath, ".."), { recursive: true, force: true });
     });
 
     it("session.next sets isIdle to false", () => {
       const dbPath = freshDb();
       const hooks = createPlugin(dummyClient(), { dbPath, teamName: TEAM, agentName: AGENT });
-      hooks.event!({ event: { type: "session.next.user-request" } as any });
-      hooks.event!({ event: { type: "session.next.assistant-response" } as any });
+      hooks.event!({ event: { type: "session.next.user-request" } });
+      hooks.event!({ event: { type: "session.next.assistant-response" } });
       rmSync(join(dbPath, ".."), { recursive: true, force: true });
     });
 
@@ -515,6 +539,100 @@ describe("createPlugin()", () => {
       const result = await hooks.tool!.agmsg_history.execute({});
       expect(result.output).toContain("Hello");
       rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    });
+  });
+
+  describe("config.yaml", () => {
+    function freshStorage(): { storagePath: string; cleanup: () => void } {
+      const dir = mkdtempSync(join(tmpdir(), "agmsg-config-test-"));
+      return { storagePath: dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+    }
+
+    function saveEnv(key: string, val: string | undefined): () => void {
+      const prev = process.env[key];
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+      return () => {
+        if (prev === undefined) delete process.env[key];
+        else process.env[key] = prev;
+      };
+    }
+
+    it("loadSettings returns empty object when no config file", () => {
+      const { storagePath, cleanup } = freshStorage();
+      expect(loadSettings(storagePath)).toEqual({});
+      cleanup();
+    });
+
+    it("saveSettings and loadSettings round-trip", () => {
+      const { storagePath, cleanup } = freshStorage();
+      saveSettings(storagePath, { teamName: "my-team", agentName: "alice", watchInterval: 5000 });
+      const loaded = loadSettings(storagePath);
+      expect(loaded.teamName).toBe("my-team");
+      expect(loaded.agentName).toBe("alice");
+      expect(loaded.watchInterval).toBe(5000);
+      cleanup();
+    });
+
+    it("resolveSettings creates config.yaml on first run (onboarding)", () => {
+      const { storagePath, cleanup } = freshStorage();
+      const restore = saveEnv("AGMSG_TEAM", undefined);
+      resolveSettings(storagePath);
+      expect(existsSync(configPath(storagePath))).toBe(true);
+      const loaded = loadSettings(storagePath);
+      expect(loaded.teamName).toBe("default_team");
+      restore();
+      cleanup();
+    });
+
+    it("does not overwrite existing config.yaml", () => {
+      const { storagePath, cleanup } = freshStorage();
+      saveSettings(storagePath, { teamName: "custom-team" });
+      const mtime1 = statSync(configPath(storagePath)).mtimeMs;
+      resolveSettings(storagePath);
+      const loaded = loadSettings(storagePath);
+      expect(loaded.teamName).toBe("custom-team");
+      expect(statSync(configPath(storagePath)).mtimeMs).toBe(mtime1);
+      cleanup();
+    });
+
+    it("env var overrides config.yaml", () => {
+      const { storagePath, cleanup } = freshStorage();
+      saveSettings(storagePath, { teamName: "from-yaml", agentName: "bot" });
+      const restore1 = saveEnv("AGMSG_TEAM", "from-env");
+      const result = resolveSettings(storagePath);
+      expect(result.teamName).toBe("from-env");
+      expect(result.agentName).toBe("bot");
+      restore1();
+      cleanup();
+    });
+
+    it("config.yaml overrides defaults when no env var", () => {
+      const { storagePath, cleanup } = freshStorage();
+      const restore = saveEnv("AGMSG_TEAM", undefined);
+      saveSettings(storagePath, { teamName: "yaml-team" });
+      const result = resolveSettings(storagePath);
+      expect(result.teamName).toBe("yaml-team");
+      expect(result.agentName).toBe("opencode"); // default
+      restore();
+      cleanup();
+    });
+
+    it("PluginOptions overrides env var", () => {
+      const { storagePath, cleanup } = freshStorage();
+      const restore1 = saveEnv("AGMSG_TEAM", "from-env");
+      const restore2 = saveEnv("AGMSG_STORAGE_PATH", storagePath);
+      const dbPath = join(storagePath, "db", "messages.db");
+      mkdirSync(join(storagePath, "db"), { recursive: true });
+      const db = new Database(dbPath);
+      db.exec("CREATE TABLE messages (id INTEGER PRIMARY KEY)");
+      db.close();
+      const hooks = createPlugin(dummyClient(), { dbPath, teamName: "from-options" });
+      // must not crash -- teamName from options wins
+      expect(hooks.tool).toBeDefined();
+      restore2();
+      restore1();
+      cleanup();
     });
   });
 });

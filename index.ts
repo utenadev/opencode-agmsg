@@ -12,8 +12,9 @@ import {
   getHistory,
   countMyUnread,
   NOTIFICATION,
+  resolveSettings,
 } from "./common.js";
-import type { AgmsgMessage, PluginConfig } from "./common.js";
+import type { AgmsgMessage, PluginConfig, PluginClient } from "./common.js";
 
 const DEFAULT_STORAGE_PATH = path.join(os.homedir(), ".agents", "skills", "agmsg");
 
@@ -28,18 +29,14 @@ interface PluginOptions {
 const MIN_AUTO_INTERVAL_MS = 5_000;
 const PROCESSING_TIMEOUT_MS = 30_000;
 
-export function createPlugin(client: {
-  session: {
-    list: (opts?: any) => Promise<any>;
-    promptAsync: (opts: any) => Promise<any>;
-  };
-}, options: PluginOptions = {}): Hooks {
+export function createPlugin(client: PluginClient, options: PluginOptions = {}): Hooks {
   const storagePath = process.env.AGMSG_STORAGE_PATH ?? DEFAULT_STORAGE_PATH;
+  const settings = resolveSettings(storagePath);
   const dbPath = options.dbPath ?? path.join(storagePath, "db", "messages.db");
-  const teamName = options.teamName ?? process.env.AGMSG_TEAM ?? "default_team";
-  const agentName = options.agentName ?? process.env.AGMSG_AGENT ?? "opencode";
-  const pollIntervalMs = options.pollIntervalMs ?? parseInt(process.env.AGMSG_WATCH_INTERVAL || "30000", 10);
-  const log = options.log ?? (() => {});
+  const teamName = options.teamName ?? settings.teamName;
+  const agentName = options.agentName ?? settings.agentName;
+  const pollIntervalMs = options.pollIntervalMs ?? settings.watchInterval;
+  const log = options.log ?? console.error;
 
   if (!fs.existsSync(dbPath)) {
     log(`[agmsg] DB not found at ${dbPath}. Plugin is no-op.`);
@@ -85,7 +82,7 @@ export function createPlugin(client: {
     processingTimer = setTimeout(() => {
       if (isProcessing) {
         isProcessing = false;
-        log(`[agmsg] Processing timeout (${PROCESSING_TIMEOUT_MS}ms) — reset`);
+        log(`[agmsg] Processing timeout (${PROCESSING_TIMEOUT_MS}ms) -- reset`);
       }
     }, PROCESSING_TIMEOUT_MS);
 
@@ -127,9 +124,9 @@ export function createPlugin(client: {
   }
 
   try {
-    client.session.list().then((result: any) => {
-      const sessions = result?.data ?? result ?? [];
-      if (Array.isArray(sessions) && sessions.length > 0) {
+    client.session.list().then((result) => {
+      const sessions: { id: string }[] = result?.data ?? [];
+      if (sessions.length > 0) {
         sessionID = sessions[0].id;
         log(`[agmsg] Session: ${sessionID}`);
       }
@@ -142,7 +139,7 @@ export function createPlugin(client: {
     try {
       const n = countMyUnread(db, cfg);
       if (n > 0) {
-        log(`📩 [agmsg] ${n} new message(s)`);
+        log(`[agmsg] ${n} new message(s)`);
         onNewMessage();
       }
     } catch (e) {
@@ -151,7 +148,7 @@ export function createPlugin(client: {
   }, pollIntervalMs);
 
   if (typeof pollTimer === "object" && "unref" in pollTimer) {
-    (pollTimer as any).unref();
+    (pollTimer as { unref: () => void }).unref();
   }
 
   return {
@@ -161,10 +158,9 @@ export function createPlugin(client: {
       db.close();
     },
 
-    event: async ({ event }) => {
-      const e = event as any;
+    event: async ({ event: e }: { event: { type: string; properties?: Record<string, unknown> } }) => {
       if (e.type === "session.idle") {
-        sessionID = e.properties.sessionID;
+        sessionID = e.properties?.sessionID as string | undefined;
         isIdle = true;
         isProcessing = false;
         clearProcessingTimer();
@@ -172,7 +168,7 @@ export function createPlugin(client: {
       } else if (e.type.startsWith("session.next.")) {
         isIdle = false;
       } else if (e.type === "session.created") {
-        sessionID = e.properties.sessionID;
+        sessionID = e.properties?.sessionID as string | undefined;
       }
     },
 
@@ -196,7 +192,7 @@ export function createPlugin(client: {
     "experimental.chat.system.transform": async (input, output) => {
       if (input.sessionID) sessionID = input.sessionID;
       output.system.push(
-        "You are connected to agmsg — agent-to-agent messaging over a shared SQLite database. " +
+        "You are connected to agmsg -- agent-to-agent messaging over a shared SQLite database. " +
         "Incoming messages from other agents appear as [agmsg] user messages. " +
         "Use `send_agmsg` to send, `agmsg_inbox` to check unread, `agmsg_team` to list members, and `agmsg_history` to view past messages."
       );
@@ -211,7 +207,7 @@ export function createPlugin(client: {
         },
         execute: async (args): Promise<{ output: string }> => {
           sendMessage(db, cfg, args.to_agent, args.body);
-          log(`[agmsg] Sent → ${args.to_agent}`);
+          log(`[agmsg] Sent -> ${args.to_agent}`);
           return { output: `Message sent to ${args.to_agent}` };
         },
       }),
@@ -234,7 +230,7 @@ export function createPlugin(client: {
         args: {},
         execute: async (): Promise<{ output: string }> => {
           const teamsDir = path.resolve(storagePath, "teams");
-          // nosemgrep: path-join-resolve-traversal — validated below
+          // nosemgrep: path-join-resolve-traversal -- validated below
           const configPath = path.resolve(teamsDir, teamName, "config.json");
           if (!configPath.startsWith(teamsDir + path.sep)) {
             return { output: `Invalid team name: ${teamName}` };
@@ -267,7 +263,7 @@ export function createPlugin(client: {
           }
           const lines = filtered.map((m: AgmsgMessage) => {
             const read = m.read_at ? "read" : "unread";
-            return `[#${m.id}] ${m.created_at} ${m.from_agent} → ${m.to_agent} (${read}): ${m.body}`;
+            return `[#${m.id}] ${m.created_at} ${m.from_agent} -> ${m.to_agent} (${read}): ${m.body}`;
           });
           return { output: lines.join("\n") };
         },

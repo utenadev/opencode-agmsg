@@ -27,9 +27,15 @@ tasks:
     cmds:
       - bun test --watch
 
+  build:
+    desc: Bundle plugin into single JS file (no node_modules needed at runtime)
+    cmds:
+      - bun build index.ts --outfile=dist/plugin.js --target=bun
+
   test:e2e:
     desc: Run end-to-end integration test
     cmds:
+      - task: build
       - ./scripts/e2e.sh
 
   typecheck:
